@@ -34,12 +34,24 @@ namespace PathSelectionModuleController
                     pbSerialPort.Image = Properties.Resources.green;
                     cbSerialPort.Enabled = false;
                     btnConnect.Text = "CLOSE";
+
+                    rbAutoCheck.Enabled = true;
+                    rbAutoMain.Enabled = true;
+
+                    rbManualCheck.Enabled = true;
+                    rbManualMain.Enabled = true;
                 }
                 else
                 {
                     pbSerialPort.Image = Properties.Resources.red;
                     cbSerialPort.Enabled = true;
                     btnConnect.Text = "OPEN";
+
+                    rbAutoCheck.Enabled = false;
+                    rbAutoMain.Enabled = false;
+
+                    rbManualCheck.Enabled = false;
+                    rbManualMain.Enabled = false;
                 }
             }
             get
@@ -48,15 +60,10 @@ namespace PathSelectionModuleController
             }
         }
 
-        private static List<CheckBox> ManualCheckPathes = new List<CheckBox>();
-        private static List<CheckBox> ManualMainPathes  = new List<CheckBox>();
-        private static List<CheckBox> AutoCheckPathes = new List<CheckBox>();
-        private static List<CheckBox> AutoMainPathes  = new List<CheckBox>();
-
         private static string Caption = "급전 모듈";
         private static object RequestLock = new object();
         private static ManualResetEvent ResponseReceivedEvent = new ManualResetEvent(false);
-        private static int ResponseTimeout = 300; // 1 seconds
+        private static int ResponseTimeout = 300; // 300ms
         private byte[] ResponseFrameBuffer = new byte[FrameConstants.MessageBufferLength];
         private int ResponseReceived = 0;
         private bool ResponseFrameStarted = false;
@@ -90,11 +97,6 @@ namespace PathSelectionModuleController
             }
             cbSerialPort.DropDownStyle = ComboBoxStyle.DropDownList;
             cbSerialPort.SelectedIndex = 0;
-        }
-
-        private void InitPathes()
-        {
-
         }
    
         // Event handlers for serial port connection group      
@@ -147,6 +149,226 @@ namespace PathSelectionModuleController
             this.Close();
         }
 
+        private void rbAuto_EnabledChanged(object sender, EventArgs e)
+        {
+            if (!rbAutoCheck.Enabled)
+            {
+                clbAutoMainIn.Enabled = false;
+                clbAutoMainOut.Enabled = false;
+                clbAutoCheck.Enabled = false;
+
+                btnAutoMain.Enabled = false;
+                btnAutoCheck.Enabled = false;
+            }
+            else
+            {
+                rbAutoCheck.Checked = true;
+                rbAuto_CheckedChanged(sender, e);
+            }
+        }
+
+        private void rbAuto_CheckedChanged(object sender, EventArgs e)
+        {
+            if (rbAutoCheck.Checked)
+            {
+                clbAutoMainIn.Enabled = false;
+                clbAutoMainOut.Enabled = false;
+                clbAutoCheck.Enabled = true;
+
+                btnAutoMain.Enabled = false;
+                btnAutoCheck.Enabled = true;
+            }
+            else
+            {
+                clbAutoMainIn.Enabled = true;
+                clbAutoMainOut.Enabled = true;
+                clbAutoCheck.Enabled = false;
+
+                btnAutoMain.Enabled = true;
+                btnAutoCheck.Enabled = false;
+            }
+        }
+
+        private void rbManual_EnabledChanged(object sender, EventArgs e)
+        {
+            if (!rbManualCheck.Enabled)
+            {
+                clbManualMainIn.Enabled = false;
+                clbManualMainOut.Enabled = false;
+                clbManualCheck.Enabled = false;
+
+                btnManualMain.Enabled = false;
+                btnManualCheck.Enabled = false;
+            }
+            else
+            {
+                rbManualCheck.Checked = true;
+                rbManual_CheckedChanged(sender, e);
+            }
+        }
+
+        private void rbManual_CheckedChanged(object sender, EventArgs e)
+        {
+            if (rbManualCheck.Checked)
+            {
+                clbManualMainIn.Enabled = false;
+                clbManualMainOut.Enabled = false;
+                clbManualCheck.Enabled = true;
+
+                btnManualMain.Enabled = false;
+                btnManualCheck.Enabled = true;
+            }
+            else
+            {
+                clbManualMainIn.Enabled = true;
+                clbManualMainOut.Enabled = true;
+                clbManualCheck.Enabled = false;
+
+                btnManualMain.Enabled = true;
+                btnManualCheck.Enabled = false;
+            }
+        }
+
+        private void btnAutoCheck_Click(object sender, EventArgs e)
+        {
+            byte[] data = new byte[7];
+            // get bits from 자동 점검 경로
+            foreach(int i in clbAutoCheck.CheckedIndices)
+            {
+                int byteIndex = i / 8;
+                int bitIndex = i % 8;
+                byte mask = (byte)(1 << bitIndex);
+                data[byteIndex] |= mask;
+            }
+
+            SendAutoPathRequest(data);
+        }
+
+        private void btnAutoMain_Click(object sender, EventArgs e)
+        {
+            byte[] data = new byte[7];
+            // get bits from 자동 주경로 입력
+            foreach (int i in clbAutoMainIn.CheckedIndices)
+            {
+                int byteIndex = 3 + i / 8;
+                int bitIndex = i % 8;
+                byte mask = (byte)(1 << bitIndex);
+                data[byteIndex] |= mask;
+            }
+
+            // get bits from 자동 주경로 출력
+            foreach (int i in clbAutoMainOut.CheckedIndices)
+            {
+                int byteIndex = 4 + i / 8;
+                int bitIndex = i % 8;
+                byte mask = (byte)(1 << bitIndex);
+                data[byteIndex] |= mask;
+            }
+
+            SendAutoPathRequest(data);
+        }
+
+        private void SendAutoPathRequest(byte[] data)
+        {
+            string valueError;
+            RequestResult reqResult;
+
+            Request request = new Request(CommandType.AutoPathRequest, data);
+            bool result = SendRequest(request, out reqResult);
+            if (result)
+            {
+                MessageBox.Show("성공",
+                    Caption,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show("실패: 값을 설정하지 못했습니다, 다시 시도해 주세요.\n" +
+                    reqResult.ErrorMessage,
+                    Caption,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+
+            // Test code
+            //bool result = SendRequestTest(request,
+            //    CommandType.AutoPathResponse,
+            //    new byte[7] { 0x00, 0x00, 0x00, 0xf0, 0x01, 0x01, 0x03 },
+            //    out reqResult);
+        }
+
+        private void btnManualCheck_Click(object sender, EventArgs e)
+        {
+            byte[] data = new byte[15];
+            // get bits from 자동 점검 경로
+            foreach (int i in clbManualCheck.CheckedIndices)
+            {
+                int byteIndex = i / 8;
+                int bitIndex = i % 8;
+                byte mask = (byte)(1 << bitIndex);
+                data[byteIndex] |= mask;
+            }
+
+            SendManualPathRequest(data);
+        }
+
+        private void btnManualMain_Click(object sender, EventArgs e)
+        {
+            byte[] data = new byte[15];
+            // get bits from 자동 주경로 입력
+            foreach (int i in clbManualMainIn.CheckedIndices)
+            {
+                int byteIndex = 7 + i / 8;
+                int bitIndex = i % 8;
+                byte mask = (byte)(1 << bitIndex);
+                data[byteIndex] |= mask;
+            }
+
+            // get bits from 자동 주경로 출력
+            foreach (int i in clbManualMainOut.CheckedIndices)
+            {
+                int byteIndex = 8 + i / 8;
+                int bitIndex = i % 8;
+                byte mask = (byte)(1 << bitIndex);
+                data[byteIndex] |= mask;
+            }
+
+            SendManualPathRequest(data);
+        }
+
+        private void SendManualPathRequest(byte[] data)
+        {
+            string valueError;
+            RequestResult reqResult;
+
+            Request request = new Request(CommandType.ManualPathRequest, data);
+            bool result = SendRequest(request, out reqResult);
+            if (result)
+            {
+                MessageBox.Show("성공",
+                    Caption,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show("실패: 값을 설정하지 못했습니다, 다시 시도해 주세요.\n" +
+                    reqResult.ErrorMessage,
+                    Caption,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+
+            // Test code
+            //bool result = SendRequestTest(request,
+            //    CommandType.ManualPathResponse,
+            //    new byte[15] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            //                   0x03,
+            //                   0x01, 0x01, 0xf0, 0x00, 0x00, 0x00, 0x00 },
+            //    out reqResult);
+        }
+
         private bool SendRequest(Request request, out RequestResult reqResult)
         {
             lock (RequestLock)
@@ -174,8 +396,8 @@ namespace PathSelectionModuleController
                 // just return false when timed out
                 if (ResponseFrameEnded)
                 {
-                    // Trim trailing NULLs
-                    byte[] responseFrame = new byte[ResponseReceived];
+                    ResponseReceivedEvent.Set();
+                    byte[] responseFrame = new byte[ResponseReceived]; // Trim trailing nulls
                     Array.Copy(ResponseFrameBuffer, responseFrame, ResponseReceived);
                     result = request.GetResult(responseFrame, out reqResult);
                 }
@@ -201,7 +423,6 @@ namespace PathSelectionModuleController
                 {
                     // Release main form when receiving response complete
                     ResponseFrameEnded = true;
-                    ResponseReceivedEvent.Set();
                 }
                 else if (ResponseFrameStarted &&
                     ResponseReceived < FrameConstants.MessageBufferLength)
@@ -211,24 +432,28 @@ namespace PathSelectionModuleController
             }
         }
 
-        private void rbtnAutoCheck_CheckedChanged(object sender, EventArgs e)
+        private bool SendRequestTest(Request request,
+                             CommandType testResponseCommand,
+                             byte[] testResponseData,
+                             out RequestResult reqResult)
         {
+            bool result = false;
 
-        }
+            // build response message
+            byte[] responseMessage = new byte[request.Message.Length];
+            responseMessage[0] = (byte)testResponseCommand;
+            testResponseData.CopyTo(responseMessage, 1);
+            ushort checksum = Request.ComputeChecksum(responseMessage);
 
-        private void rbtnAutoMain_CheckedChanged(object sender, EventArgs e)
-        {
+            // do stuffing
+            byte[] original = new byte[responseMessage.Length + 2];
+            responseMessage.CopyTo(original, 0);
+            BitConverter.GetBytes(checksum).CopyTo(original, responseMessage.Length);
+            byte[] stuffed = Request.Stuff(original);
 
-        }
-
-        private void rbtnManualCheck_CheckedChanged(object sender, EventArgs e)
-        {
-
-        }
-
-        private void rbtnManualMain_CheckedChanged(object sender, EventArgs e)
-        {
-
+            // process response message
+            result = request.GetResult(stuffed, out reqResult);
+            return result;
         }
     }
 }

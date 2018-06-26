@@ -5,35 +5,22 @@ namespace PathSelectionModuleController
 {
     public enum CommandType : byte
     {
-        StatusRequest = 0x01,
-        ModeRequest = 0x02,
-        StcRequest = 0x03,
-        AgcRequest = 0x04,
+        AutoPathRequest = 0x21,
+        ManualPathRequest = 0x22,
 
-        StatusResponse = 0x81, //test: 0x71
-        ModeResponse = 0x82,
-        StcResponse = 0x83,
-        AgcResponse = 0x84
-    }
-
-    public enum ModeType : byte
-    {
-        Normal = 0x01, //test: 0x64
-        High = 0x02
+        AutoPathResponse = 0xA1,
+        ManualPathResponse = 0xA2
     }
 
     class RequestResult
     {
         public string ErrorMessage;
-        public bool Lo1Status;
-        public bool Lo2Status;
     }
 
     class FrameConstants
     {
         public const byte StartCode = 0x7E; //test: 0x61
         public const byte EndCode = 0x7F; //test: 0x66
-        public static byte[] StatusReqData = { 0xAA, 0xBB, 0xCC };
 
         public static ushort[] CRCTable = {
             0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7,
@@ -70,8 +57,7 @@ namespace PathSelectionModuleController
             0x6E17, 0x7E36, 0x4E55, 0x5E74, 0x2E93, 0x3EB2, 0x0ED1, 0x1EF0
         };
 
-        public const int MessageBufferLength = 7;    // with stuffing
-        public const int ResponseMessageLength = 4;  // without stuffing
+        public const int MessageBufferLength = 36; // max frame length with stuffing
         public const byte CommandDifference = 0x80; //test: 0x70;
         public const byte StuffKey = 0x7D;
         public static byte[] StuffChars = { 0x7D, 0x7E, 0x7F };
@@ -86,32 +72,24 @@ namespace PathSelectionModuleController
         public int FrameLength;
 
         public byte ResponseCommand;
-        public byte ResponseData;
+        public byte[] ResponseData;
 
-        public Request(CommandType command, byte data)
+        public Request(CommandType command, byte[] data = null)
         {
-            Message = new byte[] { (byte)command, data };
+            Message = new byte[data.Length + 1];
+            Message[0] = (byte)command;
+            data.CopyTo(Message, 1);
+
             Checksum = ComputeChecksum(Message);
             ResponseCommand = (byte)(command + CommandDifference);
             ResponseData = data;
             CreateRequestFrame();
         }
 
-        // Constructor for status request command
-        public Request(CommandType command)
-        {
-            if (command != CommandType.StatusRequest) throw new ArgumentException();
-
-            Message = new byte[] { (byte)command, StatusReqData[0], StatusReqData[1], StatusReqData[2] };
-            Checksum = ComputeChecksum(Message);
-            ResponseCommand = (byte)CommandType.StatusResponse;
-            CreateRequestFrame();
-        }
-
         public void CreateRequestFrame()
         {
             // Perform character stuffing for message and CRC
-            byte[] original = new byte[Message.Length + 2];            
+            byte[] original = new byte[Message.Length + 2];
             Message.CopyTo(original, 0);
             BitConverter.GetBytes(Checksum).CopyTo(original, Message.Length);
             byte[] stuffed = Stuff(original);
@@ -121,25 +99,30 @@ namespace PathSelectionModuleController
 
             FrameBuffer[0] = StartCode;
             stuffed.CopyTo(FrameBuffer, 1);
-            FrameBuffer[FrameLength -1] = EndCode;
+            FrameBuffer[FrameLength - 1] = EndCode;
         }
 
         public bool GetResult(byte[] responseBuffer, out RequestResult result)
         {
-            byte[] responseMessage = Strip(responseBuffer);
-            result = new RequestResult();
+            byte[] response = Strip(responseBuffer);
 
-            if (responseMessage.Length < ResponseMessageLength)
-            {
-                result.ErrorMessage = "오류: 응답 메시지의 데이터가 손상됐습니다(invalid message length)";
-                return false;
-            }
+            // Get crc value
+            int length = response.Length - 2;
+            ushort crc = BitConverter.ToUInt16(response, length);
 
+            // Get message
+            byte[] responseMessage = new byte[length];
+            Array.Copy(response, responseMessage, length);
+
+            // Get command, result state, and data
             byte command = responseMessage[0];
-            byte data = responseMessage[1];
-            ushort crc = BitConverter.ToUInt16(responseMessage, 2);
+            length = responseMessage.Length - 1;
+            byte[] data = new byte[length];
+            Array.Copy(responseMessage, 1, data, 0, length);
 
-            if (ComputeChecksum(new byte[] { command, data }) != crc)
+            // Get request result
+            result = new RequestResult();
+            if (ComputeChecksum(responseMessage) != crc)
             {
                 result.ErrorMessage = "오류: 응답 메시지의 데이터가 손상됐습니다(checksum error)";
                 return false;
@@ -149,18 +132,12 @@ namespace PathSelectionModuleController
                 result.ErrorMessage = "오류: 요청과 응답이 상이합니다(command not match)";
                 return false;
             }
-            if (command != (byte)CommandType.StatusResponse &&
-                ResponseData != data)
+            if (!ResponseData.SequenceEqual(data))
             {
-                result.ErrorMessage = "요류: 요청 값과 응답 값이 상이합니다(value not match)";
+                result.ErrorMessage = "오류: 요청 값과 응답 값이 상이합니다(value not match)";
                 return false;
             }
 
-            if (command == (byte)CommandType.StatusResponse)
-            {
-                result.Lo1Status = (data & 1) != 0;
-                result.Lo2Status = (data & (1 << 1)) != 0;
-            }
             return true;
         }
 
